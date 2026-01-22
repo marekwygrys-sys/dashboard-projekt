@@ -2,10 +2,241 @@
 <html lang="cs">
 <head>
     <meta charset="UTF-8">
-    <title>Test</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evidence úrazů - Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/recharts@2.1.16/umd/Recharts.js"></script>
 </head>
 <body>
-    <h1>Ahoj, funguje to!</h1>
-    <p>Pokud toto vidíte, stránka funguje.</p>
+    <div id="root">Načítám...</div>
+    <script>
+const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSuLoAIfMc889kp56PKQIEE6mmdQwako_Orxj1ZmSjbmChHfQilbKx82X3LzwYy9nci_G780ApKj1ZH/pub?output=csv';
+const COLORS = { primary: '#8BC34A', secondary: '#FF9800', accent: '#2196F3' };
+const dayNamesShort = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
+
+function parseCSV(text) {
+  const lines = text.split('\n');
+  const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
+  const data = [];
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    for (let c of lines[i]) {
+      if (c === '"') inQuotes = !inQuotes;
+      else if (c === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
+      else current += c;
+    }
+    values.push(current.trim());
+    const row = {};
+    headers.forEach((h, idx) => { row[h] = values[idx] || ''; });
+    data.push(row);
+  }
+  return data;
+}
+
+function parseDate(s) {
+  if (!s) return null;
+  if (s.includes('.')) { const p = s.split('.'); return new Date(p[2], p[1]-1, p[0]); }
+  return new Date(s);
+}
+
+function parseTime(s) {
+  if (!s) return '08:00';
+  const m = s.match(/(\d{1,2}):(\d{2})/);
+  return m ? m[1].padStart(2,'0') + ':' + m[2] : '08:00';
+}
+
+function App() {
+  const [incidents, setIncidents] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [selectedYear, setSelectedYear] = React.useState('all');
+  const [selectedLocation, setSelectedLocation] = React.useState('all');
+
+  React.useEffect(() => {
+    fetch(SHEET_URL)
+      .then(r => r.text())
+      .then(text => {
+        const raw = parseCSV(text);
+        const parsed = raw.map((row, i) => ({
+          id: i,
+          date: row['Datum úrazu'] || '',
+          time: parseTime(row['Čas úrazu']),
+          location: row['Místo úrazu'] || 'Neuvedeno',
+          cause: row['Příčina'] || 'Neuvedeno',
+          source: row['Zdroj'] || 'Neuvedeno',
+        })).filter(r => r.date);
+        setIncidents(parsed);
+        setLoading(false);
+      })
+      .catch(e => { setError(e.message); setLoading(false); });
+  }, []);
+
+  const years = React.useMemo(() => {
+    const arr = incidents.map(i => { const d = parseDate(i.date); return d ? d.getFullYear() : null; }).filter(Boolean);
+    return [...new Set(arr)].sort((a,b) => b-a);
+  }, [incidents]);
+
+  const locations = React.useMemo(() => 
+    [...new Set(incidents.map(i => i.location))].filter(l => l && l !== 'Neuvedeno').sort()
+  , [incidents]);
+
+  const filtered = React.useMemo(() => incidents.filter(i => {
+    const d = parseDate(i.date);
+    if (!d) return false;
+    const y = d.getFullYear().toString();
+    return (selectedYear === 'all' || y === selectedYear) && (selectedLocation === 'all' || i.location === selectedLocation);
+  }), [incidents, selectedYear, selectedLocation]);
+
+  const locColors = React.useMemo(() => {
+    const cols = ['#8BC34A','#FF9800','#2196F3','#9C27B0','#F44336','#00BCD4'];
+    const m = {};
+    locations.forEach((l,i) => { m[l] = cols[i % cols.length]; });
+    return m;
+  }, [locations]);
+
+  const sourceData = React.useMemo(() => {
+    const c = {};
+    filtered.forEach(i => { c[i.source] = (c[i.source]||0) + 1; });
+    return Object.entries(c).map(([n,v]) => ({name:n, počet:v})).sort((a,b) => b.počet - a.počet).slice(0,8);
+  }, [filtered]);
+
+  const causeData = React.useMemo(() => {
+    const c = {};
+    filtered.forEach(i => { c[i.cause] = (c[i.cause]||0) + 1; });
+    return Object.entries(c).map(([n,v]) => ({name: n.length > 20 ? n.slice(0,18)+'...' : n, počet:v})).sort((a,b) => b.počet - a.počet).slice(0,8);
+  }, [filtered]);
+
+  const yearlyData = React.useMemo(() => 
+    years.map(y => ({ name: y.toString(), počet: incidents.filter(i => { const d = parseDate(i.date); return d && d.getFullYear() === y; }).length })).reverse()
+  , [incidents, years]);
+
+  const dayData = React.useMemo(() => {
+    const counts = [0,0,0,0,0,0,0];
+    filtered.forEach(i => { const d = parseDate(i.date); if(d) counts[d.getDay()]++; });
+    return dayNamesShort.map((n,i) => ({name:n, počet:counts[i]}));
+  }, [filtered]);
+
+  if (loading) return React.createElement('div', {className: 'min-h-screen bg-gray-100 flex items-center justify-center'},
+    React.createElement('div', {className: 'text-center'},
+      React.createElement('div', {className: 'animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4'}),
+      React.createElement('p', {className: 'text-gray-600'}, 'Načítám data z Google Sheets...')
+    )
+  );
+
+  if (error) return React.createElement('div', {className: 'min-h-screen bg-gray-100 flex items-center justify-center'},
+    React.createElement('div', {className: 'bg-white p-8 rounded-xl shadow text-center'},
+      React.createElement('p', {className: 'text-red-500 text-xl mb-2'}, '⚠️ Chyba'),
+      React.createElement('p', {className: 'text-gray-600'}, error)
+    )
+  );
+
+  return React.createElement('div', {className: 'min-h-screen bg-gray-100'},
+    // Header
+    React.createElement('header', {className: 'bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-50'},
+      React.createElement('div', {className: 'max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4'},
+        React.createElement('div', {className: 'flex items-center gap-4'},
+          React.createElement('div', {className: 'bg-green-500 text-white px-4 py-2 rounded-md font-bold text-sm'}, 'alza.cz'),
+          React.createElement('div', {},
+            React.createElement('h1', {className: 'text-xl font-semibold text-gray-900'}, 'Evidence úrazů'),
+            React.createElement('p', {className: 'text-xs text-gray-500'}, 'Dashboard BOZP • ' + incidents.length + ' záznamů')
+          )
+        ),
+        React.createElement('div', {className: 'flex gap-3'},
+          React.createElement('select', {value: selectedYear, onChange: e => setSelectedYear(e.target.value), className: 'bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm'},
+            React.createElement('option', {value: 'all'}, 'Všechny roky'),
+            years.map(y => React.createElement('option', {key: y, value: y.toString()}, y))
+          ),
+          React.createElement('select', {value: selectedLocation, onChange: e => setSelectedLocation(e.target.value), className: 'bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm'},
+            React.createElement('option', {value: 'all'}, 'Všechny lokality'),
+            locations.map(l => React.createElement('option', {key: l, value: l}, l))
+          )
+        )
+      )
+    ),
+    // Main
+    React.createElement('main', {className: 'p-6 max-w-7xl mx-auto'},
+      // Stats
+      React.createElement('div', {className: 'grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'},
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Celkem úrazů'),
+          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, filtered.length)
+        ),
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Tento rok'),
+          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, incidents.filter(i => { const d = parseDate(i.date); return d && d.getFullYear() === new Date().getFullYear(); }).length)
+        ),
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Lokality'),
+          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, locations.length)
+        ),
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Průměr/rok'),
+          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, years.length ? Math.round(incidents.length / years.length) : 0)
+        )
+      ),
+      // Charts
+      React.createElement('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'},
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Zdroje úrazů'),
+          React.createElement(Recharts.ResponsiveContainer, {width: '100%', height: 250},
+            React.createElement(Recharts.BarChart, {data: sourceData, layout: 'vertical'},
+              React.createElement(Recharts.XAxis, {type: 'number', axisLine: false, tickLine: false}),
+              React.createElement(Recharts.YAxis, {type: 'category', dataKey: 'name', axisLine: false, tickLine: false, width: 100, tick: {fontSize: 11}}),
+              React.createElement(Recharts.Tooltip, {}),
+              React.createElement(Recharts.Bar, {dataKey: 'počet', fill: COLORS.accent, radius: [0,4,4,0]})
+            )
+          )
+        ),
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Příčiny úrazů'),
+          React.createElement(Recharts.ResponsiveContainer, {width: '100%', height: 250},
+            React.createElement(Recharts.BarChart, {data: causeData, layout: 'vertical'},
+              React.createElement(Recharts.XAxis, {type: 'number', axisLine: false, tickLine: false}),
+              React.createElement(Recharts.YAxis, {type: 'category', dataKey: 'name', axisLine: false, tickLine: false, width: 120, tick: {fontSize: 11}}),
+              React.createElement(Recharts.Tooltip, {}),
+              React.createElement(Recharts.Bar, {dataKey: 'počet', fill: COLORS.secondary, radius: [0,4,4,0]})
+            )
+          )
+        )
+      ),
+      React.createElement('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4'},
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Vývoj podle roků'),
+          React.createElement(Recharts.ResponsiveContainer, {width: '100%', height: 220},
+            React.createElement(Recharts.BarChart, {data: yearlyData},
+              React.createElement(Recharts.XAxis, {dataKey: 'name', axisLine: false, tickLine: false}),
+              React.createElement(Recharts.YAxis, {axisLine: false, tickLine: false}),
+              React.createElement(Recharts.Tooltip, {}),
+              React.createElement(Recharts.Bar, {dataKey: 'počet', fill: COLORS.primary, radius: [4,4,0,0]})
+            )
+          )
+        ),
+        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
+          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Úrazy podle dne v týdnu'),
+          React.createElement(Recharts.ResponsiveContainer, {width: '100%', height: 220},
+            React.createElement(Recharts.BarChart, {data: dayData},
+              React.createElement(Recharts.XAxis, {dataKey: 'name', axisLine: false, tickLine: false}),
+              React.createElement(Recharts.YAxis, {axisLine: false, tickLine: false}),
+              React.createElement(Recharts.Tooltip, {}),
+              React.createElement(Recharts.Bar, {dataKey: 'počet', fill: COLORS.primary, radius: [4,4,0,0]})
+            )
+          )
+        )
+      )
+    ),
+    // Footer
+    React.createElement('footer', {className: 'border-t border-gray-200 py-4 text-center bg-white mt-6'},
+      React.createElement('p', {className: 'text-gray-400 text-xs'}, 'Evidence pracovních úrazů © 2025 • Systém BOZP')
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
 </body>
 </html>
