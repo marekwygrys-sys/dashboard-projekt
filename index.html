@@ -5,291 +5,214 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Evidence úrazů - Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.15.0/Recharts.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
-<body>
-    <div id="root">Načítám...</div>
+<body class="bg-gray-100 min-h-screen">
+    <div id="root">
+        <div class="min-h-screen flex items-center justify-center">
+            <div class="text-center">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4"></div>
+                <p class="text-gray-600">Načítám data z Google Sheets...</p>
+            </div>
+        </div>
+    </div>
+
     <script>
 var SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSuLoAIfMc889kp56PKQIEE6mmdQwako_Orxj1ZmSjbmChHfQilbKx82X3LzwYy9nci_G780ApKj1ZH/pub?output=csv';
-var COLORS = { primary: '#8BC34A', secondary: '#FF9800', accent: '#2196F3' };
+var COLORS = { primary: '#8BC34A', secondary: '#FF9800', accent: '#2196F3', purple: '#9C27B0', red: '#F44336', cyan: '#00BCD4' };
 var dayNamesShort = ['Ne', 'Po', 'Út', 'St', 'Čt', 'Pá', 'So'];
 
 function parseCSV(text) {
-  var lines = text.split('\n');
-  var headers = lines[0].split(',').map(function(h) { return h.trim().replace(/"/g, ''); });
-  var data = [];
-  for (var i = 1; i < lines.length; i++) {
-    if (!lines[i].trim()) continue;
-    var values = [];
-    var current = '';
-    var inQuotes = false;
-    for (var j = 0; j < lines[i].length; j++) {
-      var c = lines[i][j];
-      if (c === '"') inQuotes = !inQuotes;
-      else if (c === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
-      else current += c;
+    var lines = text.split('\n');
+    var headers = lines[0].split(',').map(function(h) { return h.trim().replace(/"/g, ''); });
+    var data = [];
+    for (var i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        var values = [];
+        var current = '';
+        var inQuotes = false;
+        for (var j = 0; j < lines[i].length; j++) {
+            var c = lines[i][j];
+            if (c === '"') inQuotes = !inQuotes;
+            else if (c === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
+            else current += c;
+        }
+        values.push(current.trim());
+        var row = {};
+        headers.forEach(function(h, idx) { row[h] = values[idx] || ''; });
+        data.push(row);
     }
-    values.push(current.trim());
-    var row = {};
-    headers.forEach(function(h, idx) { row[h] = values[idx] || ''; });
-    data.push(row);
-  }
-  return data;
+    return data;
 }
 
 function parseDate(s) {
-  if (!s) return null;
-  if (s.includes('.')) { var p = s.split('.'); return new Date(p[2], p[1]-1, p[0]); }
-  return new Date(s);
+    if (!s) return null;
+    if (s.includes('.')) { var p = s.split('.'); return new Date(p[2], p[1]-1, p[0]); }
+    return new Date(s);
 }
 
-function App() {
-  var _React = React;
-  var useState = _React.useState;
-  var useEffect = _React.useEffect;
-  var useMemo = _React.useMemo;
-  
-  var _state = useState([]);
-  var incidents = _state[0];
-  var setIncidents = _state[1];
-  
-  var _loading = useState(true);
-  var loading = _loading[0];
-  var setLoading = _loading[1];
-  
-  var _error = useState(null);
-  var error = _error[0];
-  var setError = _error[1];
-  
-  var _year = useState('all');
-  var selectedYear = _year[0];
-  var setSelectedYear = _year[1];
-  
-  var _loc = useState('all');
-  var selectedLocation = _loc[0];
-  var setSelectedLocation = _loc[1];
+function parseTime(s) {
+    if (!s) return '08:00';
+    var m = s.match(/(\d{1,2}):(\d{2})/);
+    return m ? m[1].padStart(2,'0') + ':' + m[2] : '08:00';
+}
 
-  useEffect(function() {
-    fetch(SHEET_URL)
-      .then(function(r) { return r.text(); })
-      .then(function(text) {
+fetch(SHEET_URL)
+    .then(function(r) { return r.text(); })
+    .then(function(text) {
         var raw = parseCSV(text);
-        var parsed = raw.map(function(row, i) {
-          return {
-            id: i,
-            date: row['Datum úrazu'] || '',
-            location: row['Místo úrazu'] || 'Neuvedeno',
-            cause: row['Příčina'] || 'Neuvedeno',
-            source: row['Zdroj'] || 'Neuvedeno'
-          };
+        var incidents = raw.map(function(row, i) {
+            return {
+                id: i,
+                date: row['Datum úrazu'] || '',
+                time: parseTime(row['Čas úrazu']),
+                location: row['Místo úrazu'] || 'Neuvedeno',
+                cause: row['Příčina'] || 'Neuvedeno',
+                source: row['Zdroj'] || 'Neuvedeno'
+            };
         }).filter(function(r) { return r.date; });
-        setIncidents(parsed);
-        setLoading(false);
-      })
-      .catch(function(e) { setError(e.message); setLoading(false); });
-  }, []);
 
-  var years = useMemo(function() {
-    var arr = incidents.map(function(i) { var d = parseDate(i.date); return d ? d.getFullYear() : null; }).filter(Boolean);
-    return Array.from(new Set(arr)).sort(function(a,b) { return b-a; });
-  }, [incidents]);
+        var years = Array.from(new Set(incidents.map(function(i) { 
+            var d = parseDate(i.date); 
+            return d ? d.getFullYear() : null; 
+        }).filter(Boolean))).sort(function(a,b) { return b-a; });
 
-  var locations = useMemo(function() {
-    return Array.from(new Set(incidents.map(function(i) { return i.location; }))).filter(function(l) { return l && l !== 'Neuvedeno'; }).sort();
-  }, [incidents]);
+        var locations = Array.from(new Set(incidents.map(function(i) { return i.location; }))).filter(function(l) { return l && l !== 'Neuvedeno'; }).sort();
+        
+        var sources = {};
+        incidents.forEach(function(i) { sources[i.source] = (sources[i.source]||0) + 1; });
+        var sourceData = Object.entries(sources).sort(function(a,b) { return b[1] - a[1]; }).slice(0,8);
 
-  var filtered = useMemo(function() {
-    return incidents.filter(function(i) {
-      var d = parseDate(i.date);
-      if (!d) return false;
-      var y = d.getFullYear().toString();
-      return (selectedYear === 'all' || y === selectedYear) && (selectedLocation === 'all' || i.location === selectedLocation);
+        var causes = {};
+        incidents.forEach(function(i) { causes[i.cause] = (causes[i.cause]||0) + 1; });
+        var causeData = Object.entries(causes).sort(function(a,b) { return b[1] - a[1]; }).slice(0,8);
+
+        var yearCounts = {};
+        years.forEach(function(y) { yearCounts[y] = 0; });
+        incidents.forEach(function(i) { var d = parseDate(i.date); if(d) yearCounts[d.getFullYear()]++; });
+
+        var dayCounts = [0,0,0,0,0,0,0];
+        incidents.forEach(function(i) { var d = parseDate(i.date); if(d) dayCounts[d.getDay()]++; });
+
+        var hourCounts = {};
+        for(var h=6; h<=18; h++) hourCounts[h] = 0;
+        incidents.forEach(function(i) { 
+            var hour = parseInt(i.time.split(':')[0]); 
+            if(hour >= 6 && hour <= 18) hourCounts[hour]++; 
+        });
+
+        var locCounts = {};
+        locations.forEach(function(l) { locCounts[l] = 0; });
+        incidents.forEach(function(i) { if(locCounts[i.location] !== undefined) locCounts[i.location]++; });
+
+        var thisYear = incidents.filter(function(i) { var d = parseDate(i.date); return d && d.getFullYear() === new Date().getFullYear(); }).length;
+        var avgPerYear = years.length ? Math.round(incidents.length / years.length) : 0;
+
+        document.getElementById('root').innerHTML = '\
+        <header class="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-50">\
+            <div class="max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4">\
+                <div class="flex items-center gap-4">\
+                    <div class="bg-green-500 text-white px-4 py-2 rounded-md font-bold text-sm">alza.cz</div>\
+                    <div>\
+                        <h1 class="text-xl font-semibold text-gray-900">Evidence úrazů</h1>\
+                        <p class="text-xs text-gray-500">Dashboard BOZP • ' + incidents.length + ' záznamů</p>\
+                    </div>\
+                </div>\
+            </div>\
+        </header>\
+        <main class="p-6 max-w-7xl mx-auto">\
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <p class="text-gray-500 text-sm">Celkem úrazů</p>\
+                    <p class="text-3xl font-bold text-gray-900 mt-1">' + incidents.length + '</p>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <p class="text-gray-500 text-sm">Tento rok (' + new Date().getFullYear() + ')</p>\
+                    <p class="text-3xl font-bold text-gray-900 mt-1">' + thisYear + '</p>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <p class="text-gray-500 text-sm">Lokality</p>\
+                    <p class="text-3xl font-bold text-gray-900 mt-1">' + locations.length + '</p>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <p class="text-gray-500 text-sm">Průměr/rok</p>\
+                    <p class="text-3xl font-bold text-gray-900 mt-1">' + avgPerYear + '</p>\
+                </div>\
+            </div>\
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Zdroje úrazů</h3>\
+                    <canvas id="sourceChart" height="200"></canvas>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Příčiny úrazů</h3>\
+                    <canvas id="causeChart" height="200"></canvas>\
+                </div>\
+            </div>\
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Vývoj podle roků</h3>\
+                    <canvas id="yearChart" height="200"></canvas>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Úrazy podle dne v týdnu</h3>\
+                    <canvas id="dayChart" height="200"></canvas>\
+                </div>\
+            </div>\
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Úrazy podle hodiny</h3>\
+                    <canvas id="hourChart" height="200"></canvas>\
+                </div>\
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-200">\
+                    <h3 class="text-gray-900 font-semibold mb-4">Podíl lokalit</h3>\
+                    <canvas id="locChart" height="200"></canvas>\
+                </div>\
+            </div>\
+        </main>\
+        <footer class="border-t border-gray-200 py-4 text-center bg-white mt-6">\
+            <p class="text-gray-400 text-xs">Evidence pracovních úrazů © 2025 • Systém BOZP</p>\
+        </footer>';
+
+        // Grafy
+        new Chart(document.getElementById('sourceChart'), {
+            type: 'bar',
+            data: { labels: sourceData.map(function(d){return d[0];}), datasets: [{label: 'Počet', data: sourceData.map(function(d){return d[1];}), backgroundColor: COLORS.accent}] },
+            options: { indexAxis: 'y', plugins: { legend: { display: false } } }
+        });
+
+        new Chart(document.getElementById('causeChart'), {
+            type: 'bar',
+            data: { labels: causeData.map(function(d){return d[0].length > 20 ? d[0].slice(0,18)+'...' : d[0];}), datasets: [{label: 'Počet', data: causeData.map(function(d){return d[1];}), backgroundColor: COLORS.secondary}] },
+            options: { indexAxis: 'y', plugins: { legend: { display: false } } }
+        });
+
+        new Chart(document.getElementById('yearChart'), {
+            type: 'bar',
+            data: { labels: years.slice().reverse().map(String), datasets: [{label: 'Počet', data: years.slice().reverse().map(function(y){return yearCounts[y];}), backgroundColor: COLORS.primary}] },
+            options: { plugins: { legend: { display: false } } }
+        });
+
+        new Chart(document.getElementById('dayChart'), {
+            type: 'bar',
+            data: { labels: dayNamesShort, datasets: [{label: 'Počet', data: dayCounts, backgroundColor: dayCounts.map(function(_,i){return i===0||i===6 ? COLORS.secondary : COLORS.primary;})}] },
+            options: { plugins: { legend: { display: false } } }
+        });
+
+        new Chart(document.getElementById('hourChart'), {
+            type: 'bar',
+            data: { labels: Object.keys(hourCounts).map(function(h){return h+':00';}), datasets: [{label: 'Počet', data: Object.values(hourCounts), backgroundColor: COLORS.accent}] },
+            options: { plugins: { legend: { display: false } } }
+        });
+
+        new Chart(document.getElementById('locChart'), {
+            type: 'doughnut',
+            data: { labels: locations, datasets: [{data: locations.map(function(l){return locCounts[l];}), backgroundColor: [COLORS.primary, COLORS.secondary, COLORS.accent, COLORS.purple, COLORS.red, COLORS.cyan]}] }
+        });
+    })
+    .catch(function(e) {
+        document.getElementById('root').innerHTML = '<div class="min-h-screen flex items-center justify-center"><div class="bg-white p-8 rounded-xl shadow text-center"><p class="text-red-500 text-xl mb-2">⚠️ Chyba</p><p class="text-gray-600">' + e.message + '</p></div></div>';
     });
-  }, [incidents, selectedYear, selectedLocation]);
-
-  var sourceData = useMemo(function() {
-    var c = {};
-    filtered.forEach(function(i) { c[i.source] = (c[i.source]||0) + 1; });
-    return Object.entries(c).map(function(e) { return {name: e[0], počet: e[1]}; }).sort(function(a,b) { return b.počet - a.počet; }).slice(0,8);
-  }, [filtered]);
-
-  var causeData = useMemo(function() {
-    var c = {};
-    filtered.forEach(function(i) { c[i.cause] = (c[i.cause]||0) + 1; });
-    return Object.entries(c).map(function(e) { return {name: e[0].length > 20 ? e[0].slice(0,18)+'...' : e[0], počet: e[1]}; }).sort(function(a,b) { return b.počet - a.počet; }).slice(0,8);
-  }, [filtered]);
-
-  var yearlyData = useMemo(function() {
-    return years.map(function(y) {
-      return { name: y.toString(), počet: incidents.filter(function(i) { var d = parseDate(i.date); return d && d.getFullYear() === y; }).length };
-    }).reverse();
-  }, [incidents, years]);
-
-  var dayData = useMemo(function() {
-    var counts = [0,0,0,0,0,0,0];
-    filtered.forEach(function(i) { var d = parseDate(i.date); if(d) counts[d.getDay()]++; });
-    return dayNamesShort.map(function(n,i) { return {name:n, počet:counts[i]}; });
-  }, [filtered]);
-
-  if (loading) {
-    return React.createElement('div', {className: 'min-h-screen bg-gray-100 flex items-center justify-center'},
-      React.createElement('div', {className: 'text-center'},
-        React.createElement('div', {className: 'animate-spin rounded-full h-12 w-12 border-b-2 border-green-500 mx-auto mb-4'}),
-        React.createElement('p', {className: 'text-gray-600'}, 'Načítám data z Google Sheets...')
-      )
-    );
-  }
-
-  if (error) {
-    return React.createElement('div', {className: 'min-h-screen bg-gray-100 flex items-center justify-center'},
-      React.createElement('div', {className: 'bg-white p-8 rounded-xl shadow text-center'},
-        React.createElement('p', {className: 'text-red-500 text-xl mb-2'}, '⚠️ Chyba'),
-        React.createElement('p', {className: 'text-gray-600'}, error)
-      )
-    );
-  }
-
-  // Zkontrolujeme jestli Recharts existuje
-  if (typeof Recharts === 'undefined') {
-    return React.createElement('div', {className: 'min-h-screen bg-gray-100 p-8'},
-      React.createElement('div', {className: 'max-w-4xl mx-auto'},
-        React.createElement('div', {className: 'bg-white rounded-xl p-6 shadow mb-6'},
-          React.createElement('h1', {className: 'text-2xl font-bold text-gray-900 mb-2'}, 'Evidence úrazů - Dashboard'),
-          React.createElement('p', {className: 'text-gray-500'}, 'Načteno ' + incidents.length + ' záznamů')
-        ),
-        React.createElement('div', {className: 'grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'},
-          React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow'},
-            React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Celkem'),
-            React.createElement('p', {className: 'text-3xl font-bold'}, filtered.length)
-          ),
-          React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow'},
-            React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Lokality'),
-            React.createElement('p', {className: 'text-3xl font-bold'}, locations.length)
-          ),
-          React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow'},
-            React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Roky'),
-            React.createElement('p', {className: 'text-3xl font-bold'}, years.length)
-          ),
-          React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow'},
-            React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Průměr/rok'),
-            React.createElement('p', {className: 'text-3xl font-bold'}, years.length ? Math.round(incidents.length / years.length) : 0)
-          )
-        ),
-        React.createElement('div', {className: 'bg-yellow-100 border border-yellow-400 rounded-xl p-4'},
-          React.createElement('p', {className: 'text-yellow-800'}, 'Grafy se nepodařilo načíst. Data jsou ale k dispozici.')
-        )
-      )
-    );
-  }
-
-  var BarChart = Recharts.BarChart;
-  var Bar = Recharts.Bar;
-  var XAxis = Recharts.XAxis;
-  var YAxis = Recharts.YAxis;
-  var Tooltip = Recharts.Tooltip;
-  var ResponsiveContainer = Recharts.ResponsiveContainer;
-
-  return React.createElement('div', {className: 'min-h-screen bg-gray-100'},
-    React.createElement('header', {className: 'bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-50'},
-      React.createElement('div', {className: 'max-w-7xl mx-auto flex items-center justify-between flex-wrap gap-4'},
-        React.createElement('div', {className: 'flex items-center gap-4'},
-          React.createElement('div', {className: 'bg-green-500 text-white px-4 py-2 rounded-md font-bold text-sm'}, 'alza.cz'),
-          React.createElement('div', {},
-            React.createElement('h1', {className: 'text-xl font-semibold text-gray-900'}, 'Evidence úrazů'),
-            React.createElement('p', {className: 'text-xs text-gray-500'}, 'Dashboard BOZP • ' + incidents.length + ' záznamů')
-          )
-        ),
-        React.createElement('div', {className: 'flex gap-3'},
-          React.createElement('select', {value: selectedYear, onChange: function(e) { setSelectedYear(e.target.value); }, className: 'bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm'},
-            [React.createElement('option', {key: 'all', value: 'all'}, 'Všechny roky')].concat(
-              years.map(function(y) { return React.createElement('option', {key: y, value: y.toString()}, y); })
-            )
-          ),
-          React.createElement('select', {value: selectedLocation, onChange: function(e) { setSelectedLocation(e.target.value); }, className: 'bg-gray-50 border border-gray-300 rounded-lg px-3 py-2 text-sm'},
-            [React.createElement('option', {key: 'all', value: 'all'}, 'Všechny lokality')].concat(
-              locations.map(function(l) { return React.createElement('option', {key: l, value: l}, l); })
-            )
-          )
-        )
-      )
-    ),
-    React.createElement('main', {className: 'p-6 max-w-7xl mx-auto'},
-      React.createElement('div', {className: 'grid grid-cols-2 md:grid-cols-4 gap-4 mb-6'},
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Celkem úrazů'),
-          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, filtered.length)
-        ),
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Tento rok'),
-          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, incidents.filter(function(i) { var d = parseDate(i.date); return d && d.getFullYear() === new Date().getFullYear(); }).length)
-        ),
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Lokality'),
-          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, locations.length)
-        ),
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('p', {className: 'text-gray-500 text-sm'}, 'Průměr/rok'),
-          React.createElement('p', {className: 'text-3xl font-bold text-gray-900 mt-1'}, years.length ? Math.round(incidents.length / years.length) : 0)
-        )
-      ),
-      React.createElement('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4 mb-6'},
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Zdroje úrazů'),
-          React.createElement(ResponsiveContainer, {width: '100%', height: 250},
-            React.createElement(BarChart, {data: sourceData, layout: 'vertical'},
-              React.createElement(XAxis, {type: 'number', axisLine: false, tickLine: false}),
-              React.createElement(YAxis, {type: 'category', dataKey: 'name', axisLine: false, tickLine: false, width: 100, tick: {fontSize: 11}}),
-              React.createElement(Tooltip),
-              React.createElement(Bar, {dataKey: 'počet', fill: COLORS.accent, radius: [0,4,4,0]})
-            )
-          )
-        ),
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Příčiny úrazů'),
-          React.createElement(ResponsiveContainer, {width: '100%', height: 250},
-            React.createElement(BarChart, {data: causeData, layout: 'vertical'},
-              React.createElement(XAxis, {type: 'number', axisLine: false, tickLine: false}),
-              React.createElement(YAxis, {type: 'category', dataKey: 'name', axisLine: false, tickLine: false, width: 120, tick: {fontSize: 11}}),
-              React.createElement(Tooltip),
-              React.createElement(Bar, {dataKey: 'počet', fill: COLORS.secondary, radius: [0,4,4,0]})
-            )
-          )
-        )
-      ),
-      React.createElement('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4'},
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Vývoj podle roků'),
-          React.createElement(ResponsiveContainer, {width: '100%', height: 220},
-            React.createElement(BarChart, {data: yearlyData},
-              React.createElement(XAxis, {dataKey: 'name', axisLine: false, tickLine: false}),
-              React.createElement(YAxis, {axisLine: false, tickLine: false}),
-              React.createElement(Tooltip),
-              React.createElement(Bar, {dataKey: 'počet', fill: COLORS.primary, radius: [4,4,0,0]})
-            )
-          )
-        ),
-        React.createElement('div', {className: 'bg-white rounded-xl p-5 shadow-sm border border-gray-200'},
-          React.createElement('h3', {className: 'text-gray-900 font-semibold mb-4'}, 'Úrazy podle dne v týdnu'),
-          React.createElement(ResponsiveContainer, {width: '100%', height: 220},
-            React.createElement(BarChart, {data: dayData},
-              React.createElement(XAxis, {dataKey: 'name', axisLine: false, tickLine: false}),
-              React.createElement(YAxis, {axisLine: false, tickLine: false}),
-              React.createElement(Tooltip),
-              React.createElement(Bar, {dataKey: 'počet', fill: COLORS.primary, radius: [4,4,0,0]})
-            )
-          )
-        )
-      )
-    ),
-    React.createElement('footer', {className: 'border-t border-gray-200 py-4 text-center bg-white mt-6'},
-      React.createElement('p', {className: 'text-gray-400 text-xs'}, 'Evidence pracovních úrazů © 2025 • Systém BOZP')
-    )
-  );
-}
-
-ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
     </script>
 </body>
 </html>
